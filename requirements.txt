@@ -1,0 +1,8 @@
+telethon
+python-telegram-bot
+google-generativeai
+requests
+feedparser
+pymongo
+flask
+dnspython
