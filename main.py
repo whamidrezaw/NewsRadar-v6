@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 # -------------------------------------------------------------------------
 # 0. CONFIG & SERVER SETUP (دریافت اطلاعات از سرور Render)
 # -------------------------------------------------------------------------
-# این متغیرها باید در بخش Environment Variables سایت Render وارد شده باشند
 API_ID = int(os.environ.get("TELEGRAM_API_ID"))
 API_HASH = os.environ.get("TELEGRAM_API_HASH")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -35,7 +34,7 @@ STRING_SESSION = os.environ.get("STRING_SESSION")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 NEWSAPI = os.environ.get("NEWSAPI_KEY")
 
-# --- لیست منابع خبری (طبق درخواست شما) ---
+# --- لیست منابع خبری ---
 RSS_LINKS = [
     # 🇨🇳 چین
     "https://www.scmp.com/rss/91/feed",
@@ -221,7 +220,7 @@ class AIAnalyst:
         except: return {}
 
 # -------------------------------------------------------------------------
-# 4. NEXUS BOT CORE
+# 4. NEXUS BOT CORE (OPTIMIZED SPEED & STABILITY)
 # -------------------------------------------------------------------------
 class NexusBot:
     def __init__(self):
@@ -230,15 +229,17 @@ class NexusBot:
         self.analyst = AIAnalyst()
 
     async def telegram_loop(self):
-        logger.info("🟢 Cloud Telegram Monitor Started")
+        logger.info("🟢 Cloud Telegram Monitor Started (Optimized Speed)")
         try:
             async with TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH) as client:
                 if not client.is_connected(): await client.connect()
                 
                 while True:
+                    # چرخش بین کانال‌ها
                     for channel in SOURCE_CHANNELS:
                         try:
-                            async for msg in client.iter_messages(channel, limit=15):
+                            # درخواست پیام‌های جدید (تعداد کم برای فشار کمتر)
+                            async for msg in client.iter_messages(channel, limit=10):
                                 has_text = msg.text and len(msg.text) > 10
                                 has_media = msg.media is not None
                                 if not has_text and not has_media: continue
@@ -263,16 +264,32 @@ class NexusBot:
                                         
                                         logger.info(f"🚀 Sent: {unique_id}")
                                         self.memory.add_posted_item(unique_id, msg.text)
-                                        await asyncio.sleep(20)
+                                        
+                                        # استراحت بعد از ارسال موفق
+                                        await asyncio.sleep(30) 
+
                                     except Exception as e:
                                         logger.error(f"Send Error: {e}")
                                         if os.path.exists("temp_media*"): 
                                             try: os.remove("temp_media*")
                                             except: pass
-                        except: pass
-                    await asyncio.sleep(60)
+                        
+                        except Exception as e:
+                            # مدیریت خطای تایم‌اوت تلگرام (نادیده گرفتن)
+                            if "PersistentTimestampOutdatedError" in str(e):
+                                logger.warning(f"⚠️ Telegram Sync Lag on {channel} (Ignored)")
+                            else:
+                                logger.error(f"Channel Error ({channel}): {e}")
+                        
+                        # استراحت کوتاه بین چک کردن کانال‌ها
+                        await asyncio.sleep(15)
+
+                    # استراحت طولانی بعد از چک کردن تمام لیست
+                    logger.info("💤 Sleeping for 3 minutes...")
+                    await asyncio.sleep(180) 
+
         except Exception as e:
-            logger.error(f"CRITICAL: Telegram Login Failed! Check STRING_SESSION. Error: {e}")
+            logger.error(f"CRITICAL: Telegram Login Failed! Error: {e}")
 
     async def web_loop(self):
         logger.info("🔵 Cloud Web Monitor Started")
@@ -290,7 +307,8 @@ class NexusBot:
                     if not an or "DUPLICATE" in an.get('headline','') or an.get('score',0)<4: continue
                     queue.append(self.format_web(an, art))
                 
-                rem = 3600 - (time.time() - start_time) # هر 1 ساعت
+                # ارسال قطره‌چکانی در طول ۱ ساعت
+                rem = 3600 - (time.time() - start_time) 
                 if rem < 0: rem = 100
                 if queue:
                     interval = rem / len(queue)
