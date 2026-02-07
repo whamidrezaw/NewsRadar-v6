@@ -35,15 +35,28 @@ SOURCE_CHANNELS = [
     "Tasnimnews",
     "deutsch_news1",
     "khabarfuri"
+    "KHABAREROOZ_IR"
 ]
 
 BLACKLIST = [
+    # --- کانال‌ها و آیدی‌ها ---
     "@deutsch_news1", "deutsch_news1", "آخرین اخبارفوری آلمان",
     "@radiofarda_official", "radiofarda_official", "RadioFarda", "@RadioFarda",
     "@BBCPersian", "BBCPersian",
-    "Tasnimnews", "@TasnimNews", "https://www.TasnimNews.ir", "www.TasnimNews.ir",
+    "Tasnimnews", "@TasnimNews",
     "@KhabarFuri", "KhabarFuri", "KhabarFuri | اخبار",
-    "عضو شوید", "join", "لینک عضویت", "کلیک کنید"
+     "🔴@KHABAREROOZ_IR", "@KHABAREROOZ_IR", "KHABAREROOZ_IR",
+
+    
+    # --- تبلیغات سایت‌ها و لینک‌ها ---
+    "https://www.TasnimNews.ir", "www.TasnimNews.ir",
+    "سایت تسنیم را در آدرس زیر ببینید:", "▪️سایت تسنیم را در آدرس زیر ببینید:",
+
+    # --- دعوت به اقدام (Call to Action) ---
+    "عضو شوید", "join", "لینک عضویت", "کلیک کنید",
+
+    # --- کاراکترها و ایموجی‌های اضافه ---
+    "📷", "@"
 ]
 
 # ✅ امضای جدید شما
@@ -219,3 +232,4 @@ if __name__ == "__main__":
     
     loop = asyncio.get_event_loop()
     loop.run_until_complete(bot.telegram_loop())
+
