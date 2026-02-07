@@ -33,6 +33,8 @@ MONGO_URL = os.environ.get("MONGO_URL")
 STRING_SESSION = os.environ.get("STRING_SESSION")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 NEWSAPI = os.environ.get("NEWSAPI_KEY")
+GNEWSAPI = os.environ.get("GNEWSAPI_KEY")
+GNEWS_API = os.environ.get("GNEWS_API_KEY")
 
 # --- لیست منابع خبری ---
 RSS_LINKS = [
@@ -67,8 +69,7 @@ SOURCE_CHANNELS = [
     "Tasnimnews",
     "deutsch_news1",
     "khabarfuri",
-    "Euronews_Persian",
-    "AlJazeera"
+
 ]
 
 BLACKLIST = [
@@ -275,7 +276,7 @@ class NexusBot:
                                         self.memory.add_posted_item(unique_id, msg.text)
                                         
                                         # استراحت بعد از ارسال موفق
-                                        await asyncio.sleep(30) 
+                                        await asyncio.sleep(120) 
 
                                     except Exception as e:
                                         logger.error(f"Send Error: {e}")
@@ -290,10 +291,10 @@ class NexusBot:
                                 logger.error(f"Channel Error ({channel}): {e}")
                         
                         # استراحت بین کانال‌ها
-                        await asyncio.sleep(15)
+                        await asyncio.sleep(100)
 
                     logger.info("💤 Sleeping for 3 minutes...")
-                    await asyncio.sleep(180) 
+                    await asyncio.sleep(500) 
 
         except Exception as e:
             logger.error(f"CRITICAL: Telegram Login Failed! Error: {e}")
@@ -356,3 +357,4 @@ if __name__ == "__main__":
     print("NEXUS CLOUD: ONLINE 🌩️")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(asyncio.gather(bot.telegram_loop(), bot.web_loop()))
+
