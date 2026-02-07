@@ -166,7 +166,7 @@ class NexusBot:
                     for channel in SOURCE_CHANNELS:
                         try:
                             # لیمیت 5: فشار خیلی کم
-                            async for msg in client.iter_messages(channel, limit=5):
+                            async for msg in client.iter_messages(channel, limit=15):
                                 has_text = msg.text and len(msg.text) > 10
                                 has_media = msg.media is not None
                                 if not has_text and not has_media: continue
@@ -219,7 +219,7 @@ class NexusBot:
 
                     # ترمز ۲: ۲۰ دقیقه خواب بعد از سیکل کامل
                     logger.info("💤 Cycle finished. Sleeping for 20 minutes...")
-                    await asyncio.sleep(1200)
+                    await asyncio.sleep(600)
 
         except Exception as e:
             logger.error(f"CRITICAL: Telegram Login Failed! Error: {e}")
@@ -232,5 +232,6 @@ if __name__ == "__main__":
     
     loop = asyncio.get_event_loop()
     loop.run_until_complete(bot.telegram_loop())
+
 
 
