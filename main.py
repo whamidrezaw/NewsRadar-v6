@@ -3,10 +3,7 @@ import time
 import logging
 import asyncio
 import html
-import requests
-import feedparser
 import re
-import random
 import threading
 from collections import deque
 
@@ -16,7 +13,6 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telegram import Bot
 from telegram.error import TelegramError
-import google.generativeai as genai
 
 # LOGGING
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -31,45 +27,14 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.environ.get("TELEGRAM_CHANNEL_ID")
 MONGO_URL = os.environ.get("MONGO_URL")
 STRING_SESSION = os.environ.get("STRING_SESSION")
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-NEWSAPI = os.environ.get("NEWSAPI_KEY")
-GNEWSAPI = os.environ.get("GNEWSAPI_KEY")
-GNEWS_API = os.environ.get("GNEWS_API_KEY")
 
-# --- لیست منابع خبری ---
-RSS_LINKS = [
-    # 🇨🇳 چین
-    "https://www.scmp.com/rss/91/feed",
-    "https://www.chinadaily.com.cn/rss/china_rss.xml",
-    # 🇮🇷 فارسی
-    "https://feeds.bbci.co.uk/persian/rss.xml",
-    "https://per.euronews.com/rss",
-    "https://www.independentpersian.com/rss.xml",
-    # 🇺🇸 آمریکا
-    "http://rss.cnn.com/rss/edition_world.rss",
-    "https://feeds.foxnews.com/foxnews/world",
-    "https://feeds.washingtonpost.com/rss/world",
-    "https://www.cbsnews.com/latest/rss/world",
-    # 🇪🇺 اروپا
-    "https://www.france24.com/en/rss",
-    "https://www.theguardian.com/world/rss",
-    "https://rss.dw.com/xml/rss-en-all",
-    # 🇸🇦/🇶🇦 خاورمیانه
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    # 💰 اقتصاد و تکنولوژی
-    "https://cointelegraph.com/rss",
-    "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664",
-    "https://www.theverge.com/rss/index.xml",
-]
-
-# لیست اصلاح شده (حذف کانال‌های خراب)
+# --- کانال‌های تلگرامی ---
 SOURCE_CHANNELS = [
     "BBCPersian",
     "RadioFarda",
     "Tasnimnews",
     "deutsch_news1",
-    "khabarfuri",
-
+    "khabarfuri"
 ]
 
 BLACKLIST = [
@@ -81,21 +46,22 @@ BLACKLIST = [
     "عضو شوید", "join", "لینک عضویت", "کلیک کنید"
 ]
 
-NEW_SIGNATURE = "\n\n🚀 <b>NEXUS new | اخبار نکس آس نیوز</b>\n🆔 @newsnew_now"
+# ✅ امضای جدید شما
+NEW_SIGNATURE = "\n\n📡 <b>رادار هوشمند اخبار جهان</b>\n🆔 @NewsRadar_hub"
 
-# --- FLASK SERVER ---
+# --- FLASK SERVER (برای زنده ماندن) ---
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "NEXUS BOT IS ALIVE & RUNNING! 🦁"
+    return "NewsRadar BOT IS ALIVE (TELEGRAM ONLY MODE) 📡"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
 # -------------------------------------------------------------------------
-# 1. CLOUD MEMORY
+# 1. CLOUD MEMORY (MONGODB)
 # -------------------------------------------------------------------------
 class CloudMemory:
     def __init__(self):
@@ -124,19 +90,19 @@ class CloudMemory:
             clean_title = title_snippet.replace("\n", " ").strip()[:100]
             self.recent_titles.append(clean_title)
 
-    def get_recent_titles_string(self):
-        return "\n".join([f"- {t}" for t in self.recent_titles])
-
 # -------------------------------------------------------------------------
-# 2. CONTENT CLEANER
+# 2. CONTENT CLEANER & HELPERS
 # -------------------------------------------------------------------------
 class ContentCleaner:
     @staticmethod
     def clean_and_sign(text):
         if not text: return ""
         
+        # حذف کلمات سیاه
         for bad in BLACKLIST:
             text = re.sub(f"(?i){re.escape(bad)}", "", text)
+        
+        # حذف آیدی‌ها و لینک‌ها
         text = re.sub(r'@\w+', '', text)
         text = re.sub(r'https?://\S+|www\.\S+', '', text)
         
@@ -162,82 +128,23 @@ class ContentCleaner:
         
         return "\n".join(lines) + NEW_SIGNATURE
 
-# -------------------------------------------------------------------------
-# 3. AI ANALYST
-# -------------------------------------------------------------------------
-class AIAnalyst:
-    def __init__(self):
-        genai.configure(api_key=GEMINI_KEY)
-        self.model = self.setup_model()
-
-    def setup_model(self):
-        try: return genai.GenerativeModel('models/gemini-2.5-flash')
-        except: return genai.GenerativeModel('gemini-pro')
-
-    def analyze_web_batch(self, articles_list, recent_tg):
-        if not articles_list: return []
-        limited_list = articles_list[:5]
-        
-        prompt = f"""
-        ACT AS A NEWS EDITOR.
-        IGNORE THESE (ALREADY POSTED): {recent_tg}
-        ANALYZE THESE NEW ITEMS:
-        """
-        for i, a in enumerate(limited_list):
-            prompt += f"--- {i+1} ---\nHEADLINE: {a['title']}\nCONTEXT: {a.get('description','')[:300]}\n"
-        prompt += """
-        OUTPUT PERSIAN. CHECK DUPLICATES. SHORT & PUNCHY.
-        Format:
-        TITLE_FA: [Title]
-        SCORE: [1-10]
-        CATEGORY: [Cat]
-        SUMMARY: [Max 2 sentences]
-        PREDICTION: [Max 1 sentence]
-        ###NEXT###
-        """
-        try:
-            res = self.model.generate_content(prompt)
-            results = []
-            if res.text:
-                for raw in res.text.split("###NEXT###"):
-                    if "TITLE_FA:" in raw: results.append(self.parse(raw))
-            return results
-        except: return []
-
-    def parse(self, text):
-        data = {}
-        try:
-            for line in text.split('\n'):
-                if "TITLE_FA:" in line: data['headline'] = re.sub(r'^[\*🔻🔸🔹🔴\s]+', '', line.split("TITLE_FA:")[1].strip())
-                if "SCORE:" in line: data['score'] = int(re.findall(r'\d+', line)[0])
-                if "CATEGORY:" in line: data['cat'] = line.split("CATEGORY:")[1].strip()
-                if "SUMMARY:" in line: data['sum'] = line.split("SUMMARY:")[1].strip()
-                if "PREDICTION:" in line: data['pred'] = line.split("PREDICTION:")[1].strip()
-            return data
-        except: return {}
-
-# -------------------------------------------------------------------------
-# 4. HELPER FUNCTIONS (تابع گمشده شما اینجاست) 👇
-# -------------------------------------------------------------------------
 def final_text_safe(text):
     """اگر متن طولانی باشد، تگ‌های HTML را حذف می‌کند تا ارور ندهد"""
     if len(text) > 1000:
-        # حذف تمام تگ‌های HTML برای جلوگیری از نصفه ماندن تگ‌ها
         clean_text = re.sub(r'<[^>]+>', '', text)
         return clean_text[:1000] + "..."
     return text
 
 # -------------------------------------------------------------------------
-# 5. NEXUS BOT CORE
+# 3. NEWS RADAR BOT CORE (TELEGRAM ONLY - SLOW MODE)
 # -------------------------------------------------------------------------
 class NexusBot:
     def __init__(self):
         self.bot = Bot(token=BOT_TOKEN)
         self.memory = CloudMemory()
-        self.analyst = AIAnalyst()
 
     async def telegram_loop(self):
-        logger.info("🟢 Cloud Telegram Monitor Started (Optimized Speed)")
+        logger.info("🟢 NewsRadar Monitor Started (Super Slow Mode 🛡️)")
         try:
             async with TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH) as client:
                 if not client.is_connected(): await client.connect()
@@ -245,38 +152,41 @@ class NexusBot:
                 while True:
                     for channel in SOURCE_CHANNELS:
                         try:
-                            # لیمیت 10 برای سرعت و فشار کمتر
-                            async for msg in client.iter_messages(channel, limit=10):
+                            # لیمیت 5: فشار خیلی کم
+                            async for msg in client.iter_messages(channel, limit=5):
                                 has_text = msg.text and len(msg.text) > 10
                                 has_media = msg.media is not None
                                 if not has_text and not has_media: continue
 
                                 unique_id = f"tg_{channel}_{msg.id}"
+                                
                                 if not self.memory.is_url_seen(unique_id):
                                     final_text = ContentCleaner.clean_and_sign(msg.text if msg.text else "")
                                     
                                     try:
+                                        sent = False
                                         if has_media:
                                             path = await client.download_media(msg, file="temp_media")
                                             if path:
-                                                # استفاده از تابع امن جدید برای کپشن
                                                 safe_caption = final_text_safe(final_text)
-                                                
                                                 if path.endswith(('.jpg','.png','.webp')):
                                                     await self.bot.send_photo(chat_id=CHANNEL_ID, photo=open(path,'rb'), caption=safe_caption, parse_mode="HTML")
                                                 elif path.endswith(('.mp4','.mov','.avi')):
                                                     await self.bot.send_video(chat_id=CHANNEL_ID, video=open(path,'rb'), caption=safe_caption, parse_mode="HTML")
                                                 else:
                                                     await self.bot.send_document(chat_id=CHANNEL_ID, document=open(path,'rb'), caption=safe_caption, parse_mode="HTML")
+                                                
                                                 os.remove(path)
+                                                sent = True
                                         else:
                                             await self.bot.send_message(chat_id=CHANNEL_ID, text=final_text, parse_mode="HTML", disable_web_page_preview=True)
+                                            sent = True
                                         
-                                        logger.info(f"🚀 Sent: {unique_id}")
-                                        self.memory.add_posted_item(unique_id, msg.text)
-                                        
-                                        # استراحت بعد از ارسال موفق
-                                        await asyncio.sleep(120) 
+                                        if sent:
+                                            logger.info(f"🚀 Sent: {unique_id}")
+                                            self.memory.add_posted_item(unique_id, msg.text)
+                                            # استراحت بعد از پست
+                                            await asyncio.sleep(30)
 
                                     except Exception as e:
                                         logger.error(f"Send Error: {e}")
@@ -286,75 +196,26 @@ class NexusBot:
                         
                         except Exception as e:
                             if "PersistentTimestampOutdatedError" in str(e):
-                                logger.warning(f"⚠️ Telegram Sync Lag on {channel} (Ignored)")
+                                logger.warning(f"⚠️ Telegram Lag on {channel} (Ignored)")
                             else:
                                 logger.error(f"Channel Error ({channel}): {e}")
                         
-                        # استراحت بین کانال‌ها
-                        await asyncio.sleep(100)
+                        # ترمز ۱: ۶۰ ثانیه استراحت بین هر کانال
+                        logger.info(f"⏳ Waiting 60s before next channel...")
+                        await asyncio.sleep(60)
 
-                    logger.info("💤 Sleeping for 3 minutes...")
-                    await asyncio.sleep(500) 
+                    # ترمز ۲: ۲۰ دقیقه خواب بعد از سیکل کامل
+                    logger.info("💤 Cycle finished. Sleeping for 20 minutes...")
+                    await asyncio.sleep(1200)
 
         except Exception as e:
             logger.error(f"CRITICAL: Telegram Login Failed! Error: {e}")
 
-    async def web_loop(self):
-        logger.info("🔵 Cloud Web Monitor Started")
-        while True:
-            start_time = time.time()
-            articles = self.fetch_web()
-            if articles:
-                recent = self.memory.get_recent_titles_string()
-                analyses = self.analyst.analyze_web_batch(articles, recent)
-                
-                queue = []
-                for i, art in enumerate(articles):
-                    self.memory.add_posted_item(art['url'], "WEB")
-                    an = analyses[i] if i < len(analyses) else None
-                    if not an or "DUPLICATE" in an.get('headline','') or an.get('score',0)<4: continue
-                    queue.append(self.format_web(an, art))
-                
-                rem = 3600 - (time.time() - start_time) 
-                if rem < 0: rem = 100
-                if queue:
-                    interval = rem / len(queue)
-                    for msg in queue:
-                        try:
-                            await self.bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode="HTML")
-                            logger.info("🐢 Web Sent")
-                        except: pass
-                        await asyncio.sleep(interval)
-                else: await asyncio.sleep(rem)
-            else: await asyncio.sleep(3600)
-
-    def fetch_web(self):
-        raw = []
-        try:
-            r = requests.get("https://newsapi.org/v2/top-headlines", params={"apiKey": NEWSAPI, "language": "en", "pageSize": 10}, timeout=10)
-            for a in r.json().get("articles",[]): raw.append({"title":a['title'],"description":a['description'],"url":a['url'],"source":a['source']['name']})
-        except: pass
-        for f in RSS_LINKS:
-            try:
-                d = feedparser.parse(f)
-                for e in d.entries[:2]: raw.append({"title":e.title,"description":e.title,"url":e.link,"source":d.feed.get('title','RSS')})
-            except: pass
-        final = []
-        for i in raw:
-            if i.get('url') and not self.memory.is_url_seen(i['url']): final.append(i)
-        return final[:20]
-
-    def format_web(self, an, art):
-        cat_e = "💰" if "Econ" in an.get('cat','') else "🌍"
-        return (f"{'🔴' if an['score']>7 else '🔵'} <b>{an['headline']}</b>\n\n"
-                f"📡 منبع: {html.escape(art['source'])}\n📊 اهمیت: {an['score']}/10\n{cat_e} دسته‌بندی: {an.get('cat')}\n"
-                f"─────────────────────\n💡 {an.get('sum')}\n\n🔮 {an.get('pred')}\n\n"
-                f"🔗 <a href='{art['url']}'>مشاهده خبر معتبر</a>{NEW_SIGNATURE}")
-
 if __name__ == "__main__":
     threading.Thread(target=run_web_server).start()
+    
     bot = NexusBot()
-    print("NEXUS CLOUD: ONLINE 🌩️")
+    print("NewsRadar CLOUD: ONLINE 📡")
+    
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(asyncio.gather(bot.telegram_loop(), bot.web_loop()))
-
+    loop.run_until_complete(bot.telegram_loop())
