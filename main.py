@@ -98,7 +98,7 @@ class SocialAgent:
             try:
                 genai.configure(api_key=GEMINI_API_KEY)
                 # ✅ تغییر مدل به 1.5-flash برای رفع محدودیت ۲۰ تایی گوگل
-                self.gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+                self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
                 logger.info("✅ Gemini AI Connected (Model: 1.5-flash)")
             except Exception as e:
                 logger.error(f"❌ Gemini Error: {e}")
@@ -329,4 +329,5 @@ if __name__ == "__main__":
     print("NewsRadar CLOUD: ONLINE 📡")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(bot.telegram_loop())
+
 
