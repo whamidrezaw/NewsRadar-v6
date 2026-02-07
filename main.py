@@ -267,7 +267,12 @@ class NexusBot:
 
                                     except Exception as e:
                                         logger.error(f"News Send Error: {e}")
-                                        if os.path.exists("temp_media*"): try: os.remove("temp_media*"); except: pass
+                                        # کد اصلاح شده و مرتب
+                                    if os.path.exists("temp_media"): 
+                                        try: 
+                                            os.remove("temp_media")
+                                        except: 
+                                            pass
 
                                 # 🛑 باند پروکسی
                                 elif channel in PROXY_CHANNELS:
@@ -324,3 +329,4 @@ if __name__ == "__main__":
     print("NewsRadar CLOUD: ONLINE 📡")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(bot.telegram_loop())
+
