@@ -6,3 +6,4 @@ feedparser
 pymongo
 flask
 dnspython
+tweepy
