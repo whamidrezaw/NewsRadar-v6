@@ -82,7 +82,7 @@ def run_web_server():
     app.run(host='0.0.0.0', port=port)
 
 # -------------------------------------------------------------------------
-# 1. AI & TWITTER AGENT (استراتژی امنیتی)
+# 1. AI & TWITTER AGENT (استراتژی هوشمند: شروع سریع، ادامه امن)
 # -------------------------------------------------------------------------
 class SocialAgent:
     def __init__(self):
@@ -90,14 +90,14 @@ class SocialAgent:
         self.gemini_model = None
         self.last_tweet_time = 0
         
-        # ✅ تنظیم حیاتی: هر ۹۰ دقیقه یک توییت (۵۴۰۰ ثانیه)
-        self.tweet_interval = 5400  
+        # 🚀 تنظیم اولیه: ۱۰ ثانیه (برای اینکه اولین خبر بلافاصله توییت شود)
+        self.tweet_interval = 10  
 
         if GEMINI_API_KEY:
             try:
                 genai.configure(api_key=GEMINI_API_KEY)
                 
-                # ✅ استفاده از مدل پایدار gemini-pro (رفع ارور ۴۲۹)
+                # ✅ استفاده از مدل پایدار gemini-pro (رفع قطعی ارور ۴۲۹)
                 self.gemini_model = genai.GenerativeModel('gemini-pro')
                 logger.info("✅ Gemini AI Connected (Model: gemini-pro)")
             except Exception as e:
@@ -139,15 +139,23 @@ class SocialAgent:
     def post_tweet(self, text):
         if not hasattr(self, 'twitter_client'): return
         
-        # چک کردن زمان (۹۰ دقیقه)
+        # بررسی زمان مجاز
         if time.time() - self.last_tweet_time < self.tweet_interval:
             return 
 
         try:
             final_tweet = f"{text}\n\n🔗 جزئیات در کانال تلگرام:\nt.me/NewsRadar_hub"
             self.twitter_client.create_tweet(text=final_tweet)
+            
             self.last_tweet_time = time.time()
             logger.info("🐦 Tweet Sent Successfully!")
+
+            # 🔥 سوئیچ هوشمند امنیتی
+            # اگر تایمر روی ۱۰ ثانیه بود، بعد از اولین توییت موفق، آن را روی ۹۰ دقیقه قفل کن
+            if self.tweet_interval < 100:
+                self.tweet_interval = 5400
+                logger.info("🔒 Security Mode Activated: Timer switched to 90 minutes for future tweets.")
+
         except Exception as e:
             logger.error(f"❌ Tweet Failed: {e}")
 
