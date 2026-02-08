@@ -91,15 +91,15 @@ class SocialAgent:
         self.last_tweet_time = 0
         
         # ✅ تنظیم حیاتی: هر ۹۰ دقیقه یک توییت (۵۴۰۰ ثانیه)
-        # این یعنی روزانه ۱۶ توییت = ماهی ۴۸۰ توییت (زیر سقف ۵۰۰ تایی توییتر)
         self.tweet_interval = 5400  
 
         if GEMINI_API_KEY:
             try:
                 genai.configure(api_key=GEMINI_API_KEY)
-                # ✅ تغییر مدل به 1.5-flash برای رفع محدودیت ۲۰ تایی گوگل
-                self.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
-                logger.info("✅ Gemini AI Connected (Model: 1.5-flash)")
+                
+                # ✅ استفاده از مدل پایدار gemini-pro (رفع ارور ۴۲۹)
+                self.gemini_model = genai.GenerativeModel('gemini-pro')
+                logger.info("✅ Gemini AI Connected (Model: gemini-pro)")
             except Exception as e:
                 logger.error(f"❌ Gemini Error: {e}")
 
@@ -267,12 +267,10 @@ class NexusBot:
 
                                     except Exception as e:
                                         logger.error(f"News Send Error: {e}")
-                                        # کد اصلاح شده و مرتب
-                                    if os.path.exists("temp_media"): 
-                                        try: 
-                                            os.remove("temp_media")
-                                        except: 
-                                            pass
+                                        # پاکسازی امن
+                                        if os.path.exists("temp_media"): 
+                                            try: os.remove("temp_media")
+                                            except: pass
 
                                 # 🛑 باند پروکسی
                                 elif channel in PROXY_CHANNELS:
@@ -329,5 +327,3 @@ if __name__ == "__main__":
     print("NewsRadar CLOUD: ONLINE 📡")
     loop = asyncio.get_event_loop()
     loop.run_until_complete(bot.telegram_loop())
-
-
