@@ -231,7 +231,7 @@ class ContentProcessor:
             emoji = cls._emoji(text)
             lines[0] = f"<b>{emoji} {lines[0]}</b>"
         
-        return '\n'.join(lines) + "\n\n📡 @NewsRadarHub"
+        return '\n'.join(lines) + "\n\n📡 @NewsRadar_hub"
     
     @staticmethod
     def _emoji(text: str) -> str:
@@ -515,3 +515,4 @@ if __name__ == "__main__":
     keep_alive()  # 1. اول وب‌سرور روشن می‌شود
 
     sys.exit(asyncio.run(main()))  # 2. سپس ربات اصلی اجرا می‌شود
+
