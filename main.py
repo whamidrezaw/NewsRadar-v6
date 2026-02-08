@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 import motor.motor_asyncio
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
+from telethon.tl.types import MessageMediaWebPage
 
 # وب‌سرور برای زنده نگه داشتن در Render
 try:
@@ -38,7 +39,7 @@ class Config:
     DUPLICATE_TTL: int = 86400 * 3   # حافظه تکراری‌ها (3 روز)
     
     NEWS_CHANNELS: tuple = (
-        "BBCPersian", "RadioFarda", "Tasnimnews", 
+        "BBCPersian", "Tasnimnews", 
         "deutsch_news1", "khabarfuri", "KHABAREROOZ_IR"
     )
     
@@ -60,7 +61,7 @@ class Config:
         "@", "🆔", "👇", "👉", "pv", "PV"
 
 
-          "@", "🆔", "سایت تسنیم را در آدرس زیر ببینید :", "👉", "pv", "سایت تسنیم را در آدرس زیر ببینید:"
+          "@", "tasnimnews.ir", "سایت تسنیم را در آدرس زیر ببینید :", "👉", "pv", "سایت تسنیم را در آدرس زیر ببینید:"
     )
     
     SIG_NEWS = "\n\n📡 <b>رادار اخبار</b>\n🆔 @NewsRadar_hub"
@@ -206,19 +207,22 @@ class QueueWorker:
     async def _publish_news(self, item):
         text = item['text']
         source = item['source']
-        msg_obj = item['msg_obj'] # پیام اصلی تلگرام
+        msg_obj = item['msg_obj'] 
         
         emoji = ContentEngine.get_emoji(text)
         header = text.split('\n')[0]
         body = '\n'.join(text.split('\n')[1:])
         caption = f"<b>{emoji} {header}</b>\n\n{body}{self.config.SIG_NEWS}"
 
-        # نکته طلایی: استفاده از msg_obj.media برای کپی مستقیم بدون دانلود
-        if msg_obj.media:
+        # اصلاح باگ: بررسی نوع مدیا
+        # اگر مدیا وجود دارد و از نوع WebPage (پیش‌نمایش لینک) نیست، آن را بفرست
+        valid_media = msg_obj.media and not isinstance(msg_obj.media, MessageMediaWebPage)
+
+        if valid_media:
             await self.client.send_message(
                 self.config.TARGET_CHANNEL,
                 message=caption,
-                file=msg_obj.media, # تلگرام خودش مدیا را کپی می‌کند
+                file=msg_obj.media,
                 parse_mode='html'
             )
         else:
@@ -226,7 +230,7 @@ class QueueWorker:
                 self.config.TARGET_CHANNEL,
                 caption,
                 parse_mode='html',
-                link_preview=False
+                link_preview=False # پیش‌نمایش لینک را غیرفعال می‌کنیم تا تمیز باشد
             )
         logger.info(f"✅ News Sent (Src: {source})")
 
@@ -313,3 +317,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt: pass
     except Exception as e: logger.critical(f"Fatal: {e}")
+
