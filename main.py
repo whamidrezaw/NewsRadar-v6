@@ -45,7 +45,8 @@ class Config:
     MAX_RETRIES: int = 3
     
     NEWS_CHANNELS: tuple = (
-        "bbcpersian", "radiofarda", "iranintl", "manototv"
+          "BBCPersian", "RadioFarda", "Tasnimnews", 
+    "deutsch_news1", "khabarfuri", "KHABAREROOZ_IR"
     )
     
     @classmethod
@@ -512,4 +513,5 @@ from web_server import keep_alive
 
 if __name__ == "__main__":
     keep_alive()  # 1. اول وب‌سرور روشن می‌شود
+
     sys.exit(asyncio.run(main()))  # 2. سپس ربات اصلی اجرا می‌شود
