@@ -42,31 +42,64 @@ class Config:
     MAX_QUEUE_SIZE: int = 100       # ظرفیت صف داخلی
     DUPLICATE_TTL: int = 86400 * 3  # حافظه تکراری‌ها (3 روز)
     
-    # کانال‌ها
+   # ==========================
+    # لیست کانال‌ها و تنظیمات تمیزکاری
+    # ==========================
+
     NEWS_CHANNELS: tuple = (
         "BBCPersian", "RadioFarda", "Tasnimnews", 
-        "deutsch_news1", "khabarfuri", "KHABAREROOZ_IR"
+        "deutsch_news1", "khabarfuri", "KHABAREROOZ_IR", "euronewspe"
     )
     
     PROXY_CHANNELS: tuple = (
         "iProxyem", "Proxymelimon", "famoushaji", 
-        "V2rrayVPN", "napsternetv", "v2rayng_vpn"
+        "V2rrayVPN", "napsternetv", "v2rayng_vpn", "v2rayng_org"
     )
 
+    # لیست سیاه جامع (Full Cleaning Mode)
+    # تمام این عبارات از متن خبر حذف خواهند شد
     BLACKLIST: tuple = (
-        "عضو شوید", "join", "تبلیغ", "رزرو", "bet", "سایت", "کلیک کنید",
-        "https://t.me", "@", "insta", "youtube"
-                "@deutsch_news1", "deutsch_news1", 
-        "@radiofarda_official", "radiofarda_official", "RadioFarda",
-        "@BBCPersian", "BBCPersian",
-        "Tasnimnews", "@TasnimNews",
-        "@KhabarFuri", "KhabarFuri",
-        "🔴@KHABAREROOZ_IR", "@KHABAREROOZ_IR",
-        "https://www.TasnimNews.ir",
-        "www.TasnimNews.ir",
-        "عضو شوید", "join", "لینک عضویت", "کلیک کنید", "▪️", "@"
-    )
+        # 1. حذف کامل هویت کانال‌های مبدا (با تمام حالت‌های نوشتاری)
+        "@deutsch_news1", "deutsch_news1", "Deutsch_News1",
+        "@radiofarda_official", "radiofarda_official", "RadioFarda", "radiofarda",
+        "@BBCPersian", "BBCPersian", "bbcpersian", "BBC",
+        "Tasnimnews", "@TasnimNews", "TasnimNews", "tasnimnews", "خبرگزاری تسنیم",
+        "@KhabarFuri", "KhabarFuri", "khabarfuri", "خبر فوری",
+        "🔴@KHABAREROOZ_IR", "@KHABAREROOZ_IR", "KHABAREROOZ_IR", "khabarerooz_ir",
+        "@euronewspe", "euronewspe", "euronews",
 
+        # 2. حذف لینک‌های سایت‌های خبری (دقیق)
+        "https://www.TasnimNews.ir", "www.TasnimNews.ir", "TasnimNews.ir",
+        "bbc.com/persian", "radiofarda.com",
+        
+        # 3. حذف دعوت به عضویت (فارسی و انگلیسی)
+        "عضو شوید", "جهت عضویت", "لینک عضویت", "عضویت در کانال", "پیوند عضویت",
+        "join", "Join", "JOIN", "Joing",
+        "کلیک کنید", "Click Here", "click",
+        "دنبال کنید", "Follow", "Sub", "Subscribe",
+        "مشاهده خبر", "ادامه خبر", "مشروح خبر", "جزئیات بیشتر",
+
+        # 4. حذف تبلیغات و اسپم
+        "تبلیغ", "تبلیغات", "رزرو تبلیغ", "ads", "ADS",
+        "سایت شرط بندی", "bet", "Bet", "کازینو", "پوکر", "انفجار", "پیش بینی",
+        "وی پی ان", "فیلترشکن", "vpn", "VPN", "proxy",
+        "خرید", "فروش", "سفارش", "تخفیف", "off", "OFF",
+
+        # 5. حذف شبکه‌های اجتماعی
+        "اینستاگرام", "اینستا", "insta", "Insta", "Instagram",
+        "یوتیوب", "یوتوب", "youtube", "YouTube",
+        "توئیتر", "توییتر", "twitter", "Twitter", "X.com",
+        "فیسبوک", "facebook",
+        "تلگرام", "telegram", "t.me", "https://t.me",
+
+        # 6. حذف کلی لینک‌ها و پسوندها
+        "https://", "http://", "www.",
+        ".ir", ".com", ".net", ".org", ".info",
+
+        # 7. کاراکترها و ایموجی‌های مزاحم (که معمولا اول یا آخر متن هستند)
+        "@", "🆔", "📣", "🔴", "▪️", "👇", "👉", "👈", "⭕️", "⚠️"
+    )
+    
     SIG_NEWS = "\n\n📡 <b>رادار اخبار</b>\n🆔 @NewsRadar_hub"
     SIG_PROXY = "\n\n🔐 <b>کانفیگ اختصاصی</b>\n🆔 @NewsRadar_hub"
 
@@ -337,5 +370,6 @@ if __name__ == "__main__":
         pass
     except Exception as e:
         logger.critical(f"Fatal Error: {e}")
+
 
 
