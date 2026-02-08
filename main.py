@@ -48,12 +48,12 @@ class Config:
 
     NEWS_CHANNELS: tuple = (
         "BBCPersian", "RadioFarda", "Tasnimnews", 
-        "deutsch_news1", "khabarfuri", "KHABAREROOZ_IR", "euronewspe"
+        "deutsch_news1", "khabarfuri", "KHABAREROOZ_IR"
     )
     
     PROXY_CHANNELS: tuple = (
         "iProxyem", "Proxymelimon", "famoushaji", 
-        "V2rrayVPN", "napsternetv", "v2rayng_vpn", "v2rayng_org"
+        "V2rrayVPN", "napsternetv", "v2rayng_vpn"
     )
 
     # لیست سیاه جامع (Full Cleaning Mode)
@@ -290,8 +290,11 @@ class QueueWorker:
             )
         logger.info(f"📰 News Published (Source: {data['source']})")
 
+
+from datetime import timedelta  # این خط را حتما به بالای فایل اضافه کنید اگر نیست
+
 # ============================================================================
-# 6. MAIN CONTROLLER (کنترل‌کننده اصلی)
+# 6. MAIN CONTROLLER (کنترل‌کننده اصلی با قابلیت بازگشت به عقب)
 # ============================================================================
 async def main():
     config = Config.from_env()
@@ -309,38 +312,94 @@ async def main():
     
     # راه اندازی ورکر
     worker = QueueWorker(client, config, db)
+    
+    await client.start()
+    logger.info("🚀 NewsRadar v7.1 Started!")
 
-    @client.on(events.NewMessage(chats=config.NEWS_CHANNELS + config.PROXY_CHANNELS))
+    # ====================================================================
+    # ⏳ بخش جدید: ماشین زمان (بررسی ۱ ساعت گذشته)
+    # ====================================================================
+    logger.info("⏳ Starting Backfill: Checking last 1 hour messages...")
+    
+    # زمان ۱ ساعت پیش
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    
+    # ترکیب همه کانال‌ها
+    all_targets = config.NEWS_CHANNELS + config.PROXY_CHANNELS
+    
+    for channel_name in all_targets:
+        try:
+            # دریافت پیام‌های ۱ ساعت اخیر (Reverse=True یعنی از قدیمی به جدید)
+            async for message in client.iter_messages(channel_name, offset_date=one_hour_ago, reverse=True):
+                text = message.text or ""
+                
+                # --- منطق پروکسی ---
+                if channel_name in config.PROXY_CHANNELS:
+                    configs = ContentEngine.process_proxy(text)
+                    for conf in configs:
+                        conf_hash = ContentEngine.get_content_hash(conf)
+                        if not await db.is_duplicate(conf_hash):
+                            await db.save_hash(conf_hash, channel_name)
+                            await worker.add_task('proxy', {'config': conf, 'source': channel_name})
+                
+                # --- منطق خبر ---
+                elif channel_name in config.NEWS_CHANNELS:
+                    clean_text = ContentEngine.process_news(text, config.BLACKLIST)
+                    if clean_text:
+                        news_hash = ContentEngine.get_content_hash(clean_text)
+                        if not await db.is_duplicate(news_hash):
+                            await db.save_hash(news_hash, channel_name)
+                            
+                            media = None
+                            if message.media:
+                                try:
+                                    media = await message.download_media(file=bytes)
+                                except: pass
+                            
+                            await worker.add_task('news', {
+                                'text': clean_text, 
+                                'media': media, 
+                                'source': channel_name
+                            })
+            
+            # استراحت کوتاه بین کانال‌ها (جلوگیری از فشار به تلگرام)
+            await asyncio.sleep(1.5)
+            
+        except Exception as e:
+            logger.error(f"Backfill Error on {channel_name}: {e}")
+
+    logger.info("✅ Backfill Complete! Switching to Real-time Monitor.")
+    # اجرای همزمان مصرف‌کننده صف (که الان پر از پیام‌های ۱ ساعت گذشته است)
+    asyncio.create_task(worker.start_consumer())
+
+    # ====================================================================
+    # 📡 بخش آنلاین: گوش دادن به پیام‌های جدید (Real-time)
+    # ====================================================================
+    @client.on(events.NewMessage(chats=all_targets))
     async def handler(event):
         try:
             chat = await event.get_chat()
             channel_name = chat.username or chat.title
             text = event.message.text or ""
             
-            # --- حالت پروکسی ---
+            # دقیقاً همان منطق بالا تکرار می‌شود
             if channel_name in config.PROXY_CHANNELS:
                 configs = ContentEngine.process_proxy(text)
                 for conf in configs:
-                    # تولید هش از خود کانفیگ (جلوگیری از کانفیگ تکراری)
                     conf_hash = ContentEngine.get_content_hash(conf)
-                    
                     if not await db.is_duplicate(conf_hash):
                         await db.save_hash(conf_hash, channel_name)
                         await worker.add_task('proxy', {'config': conf, 'source': channel_name})
             
-            # --- حالت خبر ---
             elif channel_name in config.NEWS_CHANNELS:
                 clean_text = ContentEngine.process_news(text, config.BLACKLIST)
                 if clean_text:
-                    # تولید هش از متن تمیز شده (اگر دو کانال یک خبر را بگذارند، دومی حذف می‌شود)
                     news_hash = ContentEngine.get_content_hash(clean_text)
-                    
                     if not await db.is_duplicate(news_hash):
                         await db.save_hash(news_hash, channel_name)
                         
                         media = None
                         if event.message.media:
-                            # دانلود مدیا فقط اگر تکراری نبود
                             media = await event.message.download_media(file=bytes)
                         
                         await worker.add_task('news', {
@@ -350,15 +409,8 @@ async def main():
                         })
 
         except Exception as e:
-            logger.error(f"Handler Error: {e}")
+            logger.error(f"Real-time Handler Error: {e}")
 
-    # شروع برنامه
-    await client.start()
-    logger.info("🚀 NewsRadar v7.0 (Hybrid) Started!")
-    
-    # اجرای همزمان مصرف‌کننده صف
-    asyncio.create_task(worker.start_consumer())
-    
     # اجرای مداوم
     await client.run_until_disconnected()
 
@@ -370,6 +422,5 @@ if __name__ == "__main__":
         pass
     except Exception as e:
         logger.critical(f"Fatal Error: {e}")
-
 
 
