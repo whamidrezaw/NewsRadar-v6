@@ -45,17 +45,25 @@ class Config:
     # کانال‌ها
     NEWS_CHANNELS: tuple = (
         "BBCPersian", "RadioFarda", "Tasnimnews", 
-        "deutsch_news1", "khabarfuri", "KHABAREROOZ_IR", "euronewspe"
+        "deutsch_news1", "khabarfuri", "KHABAREROOZ_IR"
     )
     
     PROXY_CHANNELS: tuple = (
         "iProxyem", "Proxymelimon", "famoushaji", 
-        "V2rrayVPN", "napsternetv", "v2rayng_vpn", "v2rayng_org"
+        "V2rrayVPN", "napsternetv", "v2rayng_vpn"
     )
 
     BLACKLIST: tuple = (
         "عضو شوید", "join", "تبلیغ", "رزرو", "bet", "سایت", "کلیک کنید",
         "https://t.me", "@", "insta", "youtube"
+                "@deutsch_news1", "deutsch_news1", 
+        "@radiofarda_official", "radiofarda_official", "RadioFarda",
+        "@BBCPersian", "BBCPersian",
+        "Tasnimnews", "@TasnimNews",
+        "@KhabarFuri", "KhabarFuri",
+        "🔴@KHABAREROOZ_IR", "@KHABAREROOZ_IR",
+        "https://www.TasnimNews.ir",
+        "عضو شوید", "join", "لینک عضویت", "کلیک کنید", "▪️", "@"
     )
 
     SIG_NEWS = "\n\n📡 <b>رادار اخبار</b>\n🆔 @NewsRadar_hub"
@@ -328,3 +336,4 @@ if __name__ == "__main__":
         pass
     except Exception as e:
         logger.critical(f"Fatal Error: {e}")
+
