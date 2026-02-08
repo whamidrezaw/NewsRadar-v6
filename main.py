@@ -63,6 +63,7 @@ class Config:
         "@KhabarFuri", "KhabarFuri",
         "🔴@KHABAREROOZ_IR", "@KHABAREROOZ_IR",
         "https://www.TasnimNews.ir",
+        "www.TasnimNews.ir",
         "عضو شوید", "join", "لینک عضویت", "کلیک کنید", "▪️", "@"
     )
 
@@ -336,4 +337,5 @@ if __name__ == "__main__":
         pass
     except Exception as e:
         logger.critical(f"Fatal Error: {e}")
+
 
