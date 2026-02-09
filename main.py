@@ -69,8 +69,11 @@ class Config:
     })
     
     PROXY_SOURCES: Dict[int, str] = field(default_factory=lambda: {
-        -1003333333333: "iProxyem",     # مثال (جایگزین کنید)
-        -1004444444444: "V2rayNG",      # مثال (جایگزین کنید)
+        -1002258272508: "mitivpn",     # 
+        -1001346269822: "iMTProto",      # 
+ -1002727954618: "Proxymelimon",      # 
+ -1001482133990: "napsternetv",      # 
+        
     })
     
     PROXY_FILE_EXTENSIONS: tuple = ('.npvt', '.pv', '.conf', '.ovpn')
@@ -493,4 +496,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt: pass
     except Exception as e: logger.critical(f"Fatal: {e}")
+
 
