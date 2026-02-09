@@ -1,6 +1,11 @@
 """
-NewsRadar v7.3 - Proxy Hunter Edition
-Features: MTProto Support, .npvt File Support, Zero-Copy Media, Smart Queue
+NewsRadar v9.3 - Battle-Hardened Edition
+Features: 
+- DB Worker Pool (Parallel Processing)
+- Global Flood Lock (Coordinated Backoff)
+- Real-time Metrics (Observability)
+- Integrated Discovery Pipeline (With Memory Safety)
+- Robust Retry Logic & Error Handling
 """
 
 import os
@@ -9,13 +14,16 @@ import logging
 import re
 import hashlib
 import random
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, List, Set
 
 import motor.motor_asyncio
-from telethon import TelegramClient, events
+import pymongo.errors
+from telethon import TelegramClient, events, errors
 from telethon.sessions import StringSession
-from telethon.tl.types import MessageMediaWebPage, MessageMediaDocument
+from telethon.tl.types import MessageMediaWebPage
 
 # وب‌سرور برای زنده نگه داشتن در Render
 try:
@@ -24,45 +32,53 @@ except ImportError:
     def keep_alive(): pass
 
 # ============================================================================
-# 1. CONFIGURATION
+# 1. LOGGING & METRICS
 # ============================================================================
-@dataclass(frozen=True)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger("NewsRadar-v9.3")
+
+# ============================================================================
+# 2. CONFIGURATION
+# ============================================================================
+@dataclass
 class Config:
     API_ID: int
     API_HASH: str
     STRING_SESSION: str
-    TARGET_CHANNEL: str
+    TARGET_CHANNEL: int
     MONGO_URI: str
     
-    # تنظیمات هوشمند
-    MAX_QUEUE_SIZE: int = 200        
-    DUPLICATE_TTL: int = 86400 * 3   
+    # تنظیمات صنعتی
+    DB_WORKER_COUNT: int = 3         # تعداد پردازشگرهای موازی دیتابیس
+    INGEST_QUEUE_SIZE: int = 2000    # کنترل رم
+    PUBLISH_QUEUE_SIZE: int = 1000
+    DUPLICATE_TTL: int = 86400 * 3
     
-    NEWS_CHANNELS: tuple = (
-        "BBCPersian", "Tasnimnews", 
-        "deutsch_news1", "khabarfuri", "KHABAREROOZ_IR"
-    )
+    # ⚠️ مهم: شناسه (ID) عددی کانال‌های خود را اینجا وارد کنید
+    NEWS_SOURCES: Dict[int, str] = field(default_factory=lambda: {
+        -1001111111111: "BBCPersian",   # مثال (جایگزین کنید)
+        -1002222222222: "Tasnim",       # مثال (جایگزین کنید)
+    })
     
-    PROXY_CHANNELS: tuple = (
-        "iProxyem", "Proxymelimon", "famoushaji", 
-        "V2rrayVPN", "napsternetv", "v2rayng_vpn"
-    )
+    PROXY_SOURCES: Dict[int, str] = field(default_factory=lambda: {
+        -1003333333333: "iProxyem",     # مثال (جایگزین کنید)
+        -1004444444444: "V2rayNG",      # مثال (جایگزین کنید)
+    })
     
-    # فرمت‌های فایل قابل قبول برای پروکسی
     PROXY_FILE_EXTENSIONS: tuple = ('.npvt', '.pv', '.conf', '.ovpn')
-
+    
     BLACKLIST: tuple = (
-        "@deutsch_news1", "deutsch_news1", "Deutsch_News1",
-        "@radiofarda_official", "radiofarda_official", "RadioFarda",
-        "@BBCPersian", "BBCPersian", "bbcpersian", "BBC",
-        "Tasnimnews", "@TasnimNews", "خبرگزاری تسنیم",
-        "@KhabarFuri", "KhabarFuri", "khabarfuri", "خبر فوری",
-        "KHABAREROOZ_IR", "@KHABAREROOZ_IR", "khabarerooz_ir",
+        "@deutsch_news1", "deutsch_news1", 
+        "radiofarda_official", "Tasnimnews", "@TasnimNews",
+        "@KhabarFuri", "KhabarFuri", "KHABAREROOZ_IR",
         "عضو شوید", "لینک عضویت", "join", "Join",
         "تبلیغ", "vpn", "VPN", "proxy", "فیلترشکن",
         "اینستاگرام", "youtube", "twitter", "http", "www.",
         "@", "🆔", "👇", "👉", "pv", "PV",
-        "tasnimnews.ir", "سایت تسنیم را در آدرس زیر ببینید :"
+        "tasnimnews.ir"
     )
     
     SIG_NEWS = "\n\n📡 <b>رادار اخبار</b>\n🆔 @NewsRadar_hub"
@@ -70,34 +86,29 @@ class Config:
 
     @classmethod
     def from_env(cls):
+        target = os.getenv("TARGET_CHANNEL", "")
+        try: target = int(target)
+        except: pass 
         return cls(
             API_ID=int(os.getenv("TELEGRAM_API_ID", "0")),
             API_HASH=os.getenv("TELEGRAM_API_HASH", ""),
             STRING_SESSION=os.getenv("STRING_SESSION", ""),
-            TARGET_CHANNEL=os.getenv("TARGET_CHANNEL", ""),
+            TARGET_CHANNEL=target,
             MONGO_URI=os.getenv("MONGO_URI", "mongodb://localhost:27017"),
         )
-
-# ============================================================================
-# 2. LOGGING
-# ============================================================================
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger("NewsRadar-v7.3")
 
 # ============================================================================
 # 3. CONTENT ENGINE
 # ============================================================================
 class ContentEngine:
-    # 1. پترن پروتکل‌های جدید (Vless, Vmess, etc)
-    PROTOCOL_PATTERN = re.compile(r'(vmess|vless|trojan|ss|tuic|hysteria2?)://[a-zA-Z0-9\-_@:/?=&%.#]+')
-    
-    # 2. پترن اختصاصی MTProto (تلگرام) - شکار لینک‌های t.me/proxy
-    MTPROTO_PATTERN = re.compile(r'https://t\.me/proxy\?[a-zA-Z0-9\-_@:/?=&%.#]+')
-    
+    PROTOCOL_PATTERN = re.compile(r'(?:vmess|vless|trojan|ss|tuic|hysteria2?)://[^\s<>"\)\]]+', re.IGNORECASE)
+    MTPROTO_PATTERN = re.compile(r'https://t\.me/proxy\?[^\s<>"\)\]]+', re.IGNORECASE)
     MENTION_CLEANER = re.compile(r'@[a-zA-Z0-9_]+')
+
+    @staticmethod
+    def sanitize_text(text: str) -> str:
+        if not text: return ""
+        return text.replace('\n', ' ').replace('\r', '').replace('\u200c', '').strip()
 
     @staticmethod
     def get_content_hash(text: str) -> str:
@@ -106,26 +117,20 @@ class ContentEngine:
         return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
 
     @classmethod
-    def extract_proxies(cls, text: str) -> list:
-        if not text: return []
+    def extract_proxies(cls, raw_text: str) -> list:
+        if not raw_text: return []
+        sanitized_text = cls.sanitize_text(raw_text)
         results = []
-        
-        # استخراج پروتکل‌ها
-        protocols = cls.PROTOCOL_PATTERN.findall(text)
-        results.extend([p.strip() for p in protocols if len(p) > 15])
-        
-        # استخراج MTProto
-        mtprotos = cls.MTPROTO_PATTERN.findall(text)
-        results.extend([m.strip() for m in mtprotos if len(m) > 15])
-        
-        return list(set(results))
+        results.extend(cls.PROTOCOL_PATTERN.findall(raw_text))
+        results.extend(cls.MTPROTO_PATTERN.findall(raw_text))
+        results.extend(cls.PROTOCOL_PATTERN.findall(sanitized_text))
+        return list(set(p.strip(").], ") for p in results if len(p) > 15))
 
     @classmethod
     def clean_news(cls, text: str, blacklist: tuple) -> str:
         if not text: return None
         for bad in blacklist:
-            if bad in text:
-                text = text.replace(bad, "")
+            if bad in text: text = text.replace(bad, "")
         text = cls.MENTION_CLEANER.sub('', text)
         text = re.sub(r'\n{3,}', '\n\n', text).strip()
         if len(text) < 25: return None
@@ -137,7 +142,6 @@ class ContentEngine:
         if any(x in t for x in ['فوری', 'urgent']): return '🔴'
         if any(x in t for x in ['اقتصاد', 'دلار', 'طلا']): return '💰'
         if any(x in t for x in ['جنگ', 'حمله', 'war']): return '⚔️'
-        if any(x in t for x in ['ورزش', 'فوتبال']): return '⚽️'
         return '📰'
 
 # ============================================================================
@@ -146,158 +150,245 @@ class ContentEngine:
 class Database:
     def __init__(self, uri: str):
         self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
-        self.db = self.client.newsradar_v7
+        self.db = self.client.newsradar_v9
         self.history = self.db.history
 
     async def initialize(self):
         await self.history.create_index("created_at", expireAfterSeconds=Config.DUPLICATE_TTL)
         await self.history.create_index("content_hash", unique=True)
 
-    async def is_duplicate(self, content_hash: str) -> bool:
-        return await self.history.find_one({"content_hash": content_hash}) is not None
-
-    async def save(self, content_hash: str, source: str):
+    async def save_if_new(self, content_hash: str, source: str) -> bool:
         try:
             await self.history.insert_one({
                 "content_hash": content_hash,
                 "source": source,
                 "created_at": datetime.now(timezone.utc)
             })
-        except: pass
+            return True
+        except pymongo.errors.DuplicateKeyError:
+            return False
 
 # ============================================================================
-# 5. QUEUE WORKER
+# 5. PIPELINE ARCHITECTURE (The Engine)
 # ============================================================================
-class QueueWorker:
-    def __init__(self, client: TelegramClient, config: Config):
+class PipelineManager:
+    def __init__(self, client: TelegramClient, config: Config, db: Database):
         self.client = client
         self.config = config
-        self.queue = asyncio.Queue(maxsize=config.MAX_QUEUE_SIZE)
-
-    async def add_news(self, msg_obj, clean_text, source):
-        await self.queue.put({
-            'type': 'news', 'msg_obj': msg_obj,
-            'text': clean_text, 'source': source
-        })
-
-    # متد جدید: پشتیبانی از فایل و متن برای پروکسی
-    async def add_proxy(self, content, source, is_file=False, msg_obj=None):
-        await self.queue.put({
-            'type': 'proxy',
-            'content': content,   # متن کانفیگ یا نام فایل
-            'source': source,
-            'is_file': is_file,
-            'msg_obj': msg_obj    # برای فوروارد فایل
-        })
-
-    async def start(self):
-        logger.info("👷 Worker Started & Ready...")
-        while True:
-            item = await self.queue.get()
-            try:
-                if item['type'] == 'news':
-                    await self._publish_news(item)
-                elif item['type'] == 'proxy':
-                    await self._publish_proxy(item)
-                
-                await asyncio.sleep(random.uniform(2, 5))
-            except Exception as e:
-                logger.error(f"Publish Error: {e}")
-            finally:
-                self.queue.task_done()
-
-    async def _publish_news(self, item):
-        text = item['text']
-        source = item['source']
-        msg_obj = item['msg_obj'] 
+        self.db = db
         
+        # Queues
+        self.ingest_queue = asyncio.Queue(maxsize=config.INGEST_QUEUE_SIZE)
+        self.fast_publish_queue = asyncio.Queue(maxsize=config.PUBLISH_QUEUE_SIZE)
+        self.slow_publish_queue = asyncio.Queue(maxsize=config.PUBLISH_QUEUE_SIZE)
+        
+        # Global Flood Control
+        self.global_flood_lock = asyncio.Lock()
+        self.flood_cooldown = 0
+        
+        # Metrics
+        self.metrics = {
+            "ingest_in": 0, "ingest_drop": 0,
+            "processed_db": 0, "published": 0,
+            "discovery_log": 0, "start_time": time.time()
+        }
+        
+        # Discovery Cache with Simple Memory Limit
+        self.discovery_cache: Set[int] = set()
+
+    # --- Ingestion (Zero Latency) ---
+    async def ingest(self, payload: Dict[str, Any]):
+        try:
+            self.ingest_queue.put_nowait(payload)
+            self.metrics["ingest_in"] += 1
+        except asyncio.QueueFull:
+            self.metrics["ingest_drop"] += 1
+            if self.metrics["ingest_drop"] % 50 == 0:
+                logger.warning(f"⚠️ DROP ALERT | Queue Full | Total: {self.metrics['ingest_drop']} | Source: {payload.get('source', 'unknown')}")
+
+    # --- Workers Management ---
+    async def start_processors(self):
+        logger.info("🏭 Starting Battle-Hardened Workers...")
+        
+        # 1. DB Worker Pool (Parallel)
+        for i in range(self.config.DB_WORKER_COUNT):
+            asyncio.create_task(self._safe_runner(self._db_processor, f"DB_Worker_{i}"))
+            
+        # 2. Publishers
+        asyncio.create_task(self._safe_runner(self._fast_publisher, "Fast_Publisher"))
+        asyncio.create_task(self._safe_runner(self._slow_publisher, "Slow_Publisher"))
+        
+        # 3. Metrics Monitor
+        asyncio.create_task(self._safe_runner(self._monitor_metrics, "Metrics_Monitor"))
+
+    async def _safe_runner(self, func, name):
+        """Immortal Runner with Jitter"""
+        while True:
+            try:
+                await func()
+            except asyncio.CancelledError: break
+            except Exception as e:
+                sleep_time = random.uniform(3, 8)
+                logger.error(f"❌ {name} Crashed! Restarting in {sleep_time:.1f}s... Error: {e}")
+                await asyncio.sleep(sleep_time)
+
+    # --- DB Processors ---
+    async def _db_processor(self):
+        while True:
+            item = await self.ingest_queue.get()
+            try:
+                if item['type'] == 'discovery':
+                    chat_id = item['chat_id']
+                    
+                    # Memory Safety Check for Discovery Cache
+                    if len(self.discovery_cache) > 1000:
+                        self.discovery_cache.clear()
+                        logger.info("🧹 Discovery Cache Cleared (Memory Safety)")
+
+                    if chat_id not in self.discovery_cache:
+                        logger.info(f"🔍 Discovery: {item['title']} -> ID: {chat_id}")
+                        self.discovery_cache.add(chat_id)
+                        self.metrics["discovery_log"] += 1
+                    continue
+
+                source = item['source']
+                to_publish = []
+                
+                # Logic
+                if item['type'] == 'raw_proxy':
+                    proxies = ContentEngine.extract_proxies(item['text'])
+                    for conf in proxies:
+                        h = ContentEngine.get_content_hash(conf)
+                        if await self.db.save_if_new(h, source):
+                            to_publish.append({'type': 'proxy_text', 'content': conf, 'source': source})
+                    
+                    if item.get('file_name'):
+                        u_id = f"{item['file_name']}_{item['file_size']}"
+                        h = ContentEngine.get_content_hash(u_id)
+                        if await self.db.save_if_new(h, source):
+                            to_publish.append({'type': 'proxy_file', 'msg_obj': item['msg_obj'], 'source': source})
+
+                elif item['type'] == 'raw_news':
+                    clean = ContentEngine.clean_news(item['text'], self.config.BLACKLIST)
+                    if clean:
+                        h = ContentEngine.get_content_hash(clean)
+                        if await self.db.save_if_new(h, source):
+                            to_publish.append({'type': 'news', 'text': clean, 'msg_obj': item['msg_obj'], 'source': source, 'is_heavy': item.get('is_heavy')})
+
+                # Dispatch
+                for p_item in to_publish:
+                    target_q = self.slow_publish_queue if (p_item.get('is_heavy') or p_item['type'] == 'proxy_file') else self.fast_publish_queue
+                    await target_q.put(p_item)
+                
+                self.metrics["processed_db"] += 1
+
+            except Exception as e:
+                logger.error(f"DB Proc Error: {e}")
+            finally:
+                self.ingest_queue.task_done()
+
+    # --- Global Flood Control & Retry ---
+    async def _safe_send(self, *args, **kwargs):
+        """Global Flood Aware Sender with Robust Retry"""
+        async with self.global_flood_lock:
+            now = time.time()
+            if now < self.flood_cooldown:
+                wait_time = self.flood_cooldown - now
+                logger.warning(f"🌊 Global FloodWait Active: Waiting {wait_time:.1f}s...")
+                await asyncio.sleep(wait_time)
+
+        retries = 3
+        while retries > 0:
+            try:
+                return await self.client.send_message(*args, **kwargs)
+            
+            except errors.FloodWaitError as e:
+                # Critical: Must respect Telegram
+                logger.critical(f"🌊 GLOBAL FLOODWAIT HIT: {e.seconds}s. Locking all workers.")
+                async with self.global_flood_lock:
+                    self.flood_cooldown = time.time() + e.seconds + 2
+                await asyncio.sleep(e.seconds + 2)
+                # No retry decrement on FloodWait, we wait and retry
+            
+            except Exception as e:
+                # Retryable Network/Server Errors
+                logger.error(f"⚠️ Send Error (Retry {retries}/3): {e}")
+                await asyncio.sleep(1.5)
+                retries -= 1
+                
+        logger.error("❌ Failed to send message after retries.")
+        return None
+
+    # --- Publishers ---
+    async def _fast_publisher(self):
+        while True:
+            item = await self.fast_publish_queue.get()
+            try:
+                if item['type'] == 'proxy_text':
+                    txt = f"🔑 <b>Connect to Freedom</b>\n\n<code>{item['content']}</code>{self.config.SIG_PROXY}"
+                    await self._safe_send(self.config.TARGET_CHANNEL, txt, parse_mode='html', link_preview=False)
+                elif item['type'] == 'news':
+                    await self._publish_news_item(item)
+                
+                self.metrics["published"] += 1
+                await asyncio.sleep(random.uniform(0.8, 1.5))
+            finally:
+                self.fast_publish_queue.task_done()
+
+    async def _slow_publisher(self):
+        while True:
+            item = await self.slow_publish_queue.get()
+            try:
+                if item['type'] == 'proxy_file':
+                    caption = f"📁 <b>Config File</b>\nSource: {item['source']}{self.config.SIG_PROXY}"
+                    await self._safe_send(self.config.TARGET_CHANNEL, message=caption, file=item['msg_obj'].media, parse_mode='html')
+                elif item['type'] == 'news':
+                    await self._publish_news_item(item)
+                
+                self.metrics["published"] += 1
+                await asyncio.sleep(random.uniform(2.5, 5.0))
+            finally:
+                self.slow_publish_queue.task_done()
+
+    async def _publish_news_item(self, item):
+        text = item['text']
+        msg_obj = item['msg_obj']
         emoji = ContentEngine.get_emoji(text)
         header = text.split('\n')[0]
         body = '\n'.join(text.split('\n')[1:])
         caption = f"<b>{emoji} {header}</b>\n\n{body}{self.config.SIG_NEWS}"
-
-        valid_media = msg_obj.media and not isinstance(msg_obj.media, MessageMediaWebPage)
-
-        if valid_media:
-            await self.client.send_message(
-                self.config.TARGET_CHANNEL, message=caption,
-                file=msg_obj.media, parse_mode='html'
-            )
-        else:
-            await self.client.send_message(
-                self.config.TARGET_CHANNEL, caption,
-                parse_mode='html', link_preview=False
-            )
-        logger.info(f"✅ News Sent (Src: {source})")
-
-    async def _publish_proxy(self, item):
-        source = item['source']
         
-        if item['is_file']:
-            # حالت فایل: ارسال فایل به روش Zero-Copy
-            msg_obj = item['msg_obj']
-            caption = f"📁 <b>Config File</b>\nSource: {source}{self.config.SIG_PROXY}"
-            await self.client.send_message(
-                self.config.TARGET_CHANNEL,
-                message=caption,
-                file=msg_obj.media,
-                parse_mode='html'
-            )
-            logger.info(f"✅ Proxy File Sent (Src: {source})")
+        valid_media = msg_obj.media and not isinstance(msg_obj.media, MessageMediaWebPage)
+        if valid_media:
+            await self._safe_send(self.config.TARGET_CHANNEL, message=caption, file=msg_obj.media, parse_mode='html')
         else:
-            # حالت متن: ارسال کانفیگ متنی
-            conf = item['content']
-            txt = f"🔑 <b>Connect to Freedom</b>\n\n<code>{conf}</code>{self.config.SIG_PROXY}"
-            await self.client.send_message(
-                self.config.TARGET_CHANNEL,
-                txt,
-                parse_mode='html',
-                link_preview=False
+            await self._safe_send(self.config.TARGET_CHANNEL, caption, parse_mode='html', link_preview=False)
+
+    # --- Observability ---
+    async def _monitor_metrics(self):
+        while True:
+            await asyncio.sleep(60)
+            uptime = int(time.time() - self.metrics["start_time"])
+            
+            # Simple health check
+            status = "🟢 Healthy"
+            if self.metrics["ingest_drop"] > 1000: status = "🔴 High Drops"
+            elif self.ingest_queue.qsize() > 1500: status = "🟡 Queue Backlog"
+
+            logger.info(
+                f"📊 STATS [{status}] (Up {uptime}s) | "
+                f"IngestQ: {self.ingest_queue.qsize()} | "
+                f"FastQ: {self.fast_publish_queue.qsize()} | "
+                f"SlowQ: {self.slow_publish_queue.qsize()} | "
+                f"Drops: {self.metrics['ingest_drop']} | "
+                f"DB_Proc: {self.metrics['processed_db']} | "
+                f"Pub: {self.metrics['published']}"
             )
-            logger.info(f"✅ Proxy Text Sent (Src: {source})")
 
 # ============================================================================
-# 6. MAIN LOGIC
+# 6. MAIN CONTROLLER
 # ============================================================================
-async def process_message(message, source, db: Database, worker: QueueWorker, config: Config):
-    text = message.text or ""
-    
-    # --------------------------
-    # منطق جدید پردازش پروکسی
-    # --------------------------
-    if source in config.PROXY_CHANNELS:
-        # A. جستجوی کانفیگ‌های متنی (شامل MTProto و Protocols)
-        proxies = ContentEngine.extract_proxies(text)
-        for conf in proxies:
-            h = ContentEngine.get_content_hash(conf)
-            if not await db.is_duplicate(h):
-                await db.save(h, source)
-                await worker.add_proxy(content=conf, source=source, is_file=False)
-
-        # B. جستجوی فایل‌های کانفیگ (مثل .npvt)
-        if message.file and message.file.name:
-            file_name = message.file.name.lower()
-            # بررسی پسوند فایل
-            if any(file_name.endswith(ext) for ext in config.PROXY_FILE_EXTENSIONS):
-                # برای فایل‌ها از ترکیب نام فایل + کپشن هش می‌سازیم
-                unique_id = f"{file_name}_{len(text)}" 
-                h = ContentEngine.get_content_hash(unique_id)
-                
-                if not await db.is_duplicate(h):
-                    await db.save(h, source)
-                    # ارسال به ورکر با فلگ فایل
-                    await worker.add_proxy(content=file_name, source=source, is_file=True, msg_obj=message)
-
-    # --------------------------
-    # منطق خبر (بدون تغییر)
-    # --------------------------
-    elif source in config.NEWS_CHANNELS:
-        clean_text = ContentEngine.clean_news(text, config.BLACKLIST)
-        if clean_text:
-            h = ContentEngine.get_content_hash(clean_text)
-            if not await db.is_duplicate(h):
-                await db.save(h, source)
-                await worker.add_news(message, clean_text, source)
+backfill_done = asyncio.Event()
 
 async def main():
     config = Config.from_env()
@@ -305,31 +396,87 @@ async def main():
     await db.initialize()
     
     client = TelegramClient(StringSession(config.STRING_SESSION), config.API_ID, config.API_HASH)
-    worker = QueueWorker(client, config)
+    pipeline = PipelineManager(client, config, db)
     
     await client.start()
-    asyncio.create_task(worker.start())
+    await pipeline.start_processors()
 
     logger.info("⏳ Starting Backfill...")
     one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-    all_channels = config.NEWS_CHANNELS + config.PROXY_CHANNELS
     
-    for channel in all_channels:
-        try:
-            async for msg in client.iter_messages(channel, offset_date=one_hour_ago, reverse=True):
-                await process_message(msg, channel, db, worker, config)
-            await asyncio.sleep(1)
-        except Exception as e:
-            logger.error(f"Backfill error on {channel}: {e}")
-            
-    logger.info("✅ Backfill Done. Listening for new messages...")
+    all_source_ids = list(config.NEWS_SOURCES.keys()) + list(config.PROXY_SOURCES.keys())
+    
+    if not all_source_ids: logger.warning("⚠️ No IDs in Config! Discovery Mode Active.")
 
-    @client.on(events.NewMessage(chats=all_channels))
-    async def handler(event):
+    for chat_id in all_source_ids:
         try:
-            chat = await event.get_chat()
-            source = chat.username or chat.title
-            await process_message(event.message, source, db, worker, config)
+            async for msg in client.iter_messages(chat_id, offset_date=one_hour_ago, reverse=True):
+                source = config.NEWS_SOURCES.get(chat_id) or config.PROXY_SOURCES.get(chat_id)
+                
+                payload = {
+                    'source': source,
+                    'text': msg.text or "",
+                    'msg_obj': msg,
+                    'type': 'unknown'
+                }
+                
+                if chat_id in config.PROXY_SOURCES:
+                    payload['type'] = 'raw_proxy'
+                    # ✅ FIXED INDENTATION HERE
+                    if msg.file and msg.file.name:
+                        if any(msg.file.name.lower().endswith(ext) for ext in config.PROXY_FILE_EXTENSIONS):
+                            payload['file_name'] = msg.file.name.lower()
+                            payload['file_size'] = msg.file.size
+                
+                elif chat_id in config.NEWS_SOURCES:
+                    payload['type'] = 'raw_news'
+                    payload['is_heavy'] = bool(msg.video or msg.gif)
+
+                await pipeline.ingest(payload)
+                await asyncio.sleep(0.01)
+                
+            logger.info(f"✅ Backfill pushed for {chat_id}")
+        except Exception as e:
+            logger.error(f"Backfill Error {chat_id}: {e}")
+
+    logger.info("✅ Backfill Complete. Live Mode ON.")
+    backfill_done.set()
+
+    @client.on(events.NewMessage())
+    async def handler(event):
+        if not backfill_done.is_set(): return 
+        try:
+            chat_id = event.chat_id
+            
+            # Fast Check
+            is_proxy = chat_id in config.PROXY_SOURCES
+            is_news = chat_id in config.NEWS_SOURCES
+            
+            # Discovery Logic
+            if not is_proxy and not is_news:
+                await pipeline.ingest({'type': 'discovery', 'chat_id': chat_id, 'title': event.chat.title or "Unknown"})
+                return
+
+            source = config.PROXY_SOURCES.get(chat_id) or config.NEWS_SOURCES.get(chat_id)
+            
+            payload = {
+                'source': source,
+                'text': event.message.text or "",
+                'msg_obj': event.message,
+                'type': 'raw_proxy' if is_proxy else 'raw_news'
+            }
+            
+            if is_proxy and event.message.file and event.message.file.name:
+                # ✅ FIXED INDENTATION HERE
+                if any(event.message.file.name.lower().endswith(ext) for ext in config.PROXY_FILE_EXTENSIONS):
+                    payload['file_name'] = event.message.file.name.lower()
+                    payload['file_size'] = event.message.file.size
+
+            if is_news:
+                 payload['is_heavy'] = bool(event.message.video or event.message.gif)
+
+            await pipeline.ingest(payload)
+            
         except Exception as e:
             logger.error(f"Handler Error: {e}")
 
