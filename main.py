@@ -141,7 +141,8 @@ class Config:
 # 3. CONTENT ENGINE
 # ============================================================================
 class ContentEngine:
-    PROTOCOL_PATTERN = re.compile(r'(?:vmess|vless|trojan|ss|tuic|hysteria2?)://[^\s<>"\)\]]+', re.IGNORECASE)
+# 🟢 جایگزین کن:
+    PROTOCOL_PATTERN = re.compile(r'(?:vmess|vless|trojan|ss|tuic|hysteria2?|http|https)://[^\s<>"\)\]]+', re.IGNORECASE)
     MTPROTO_PATTERN = re.compile(r'https://t\.me/proxy\?[^\s<>"\)\]]+', re.IGNORECASE)
     MENTION_CLEANER = re.compile(r'@[a-zA-Z0-9_]+')
 
@@ -156,6 +157,7 @@ class ContentEngine:
         normalized = re.sub(r'\s+', '', text.lower().strip())
         return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
 
+# 🟢 جایگزین کن:
     @classmethod
     def extract_proxies(cls, raw_text: str) -> list:
         if not raw_text: return []
@@ -164,7 +166,19 @@ class ContentEngine:
         results.extend(cls.PROTOCOL_PATTERN.findall(raw_text))
         results.extend(cls.MTPROTO_PATTERN.findall(raw_text))
         results.extend(cls.PROTOCOL_PATTERN.findall(sanitized_text))
-        return list(set(p.strip(").], ") for p in results if len(p) > 15))
+        
+        # فیلتر کردن لینک‌های مزاحم
+        cleaned_results = []
+        for p in results:
+            p = p.strip(").], ")
+            if len(p) < 10: continue
+            # اگر http است اما مربوط به تلگرام/اینستاگرام/توییتر است، کانفیگ نیست
+            if p.lower().startswith('http'):
+                if any(x in p.lower() for x in ['t.me', 'instagram.com', 'youtube.com', 'twitter.com', 'x.com']):
+                    continue
+            cleaned_results.append(p)
+            
+        return list(set(cleaned_results))
 
     @classmethod
     def clean_news(cls, text: str, blacklist: tuple) -> str:
@@ -173,7 +187,7 @@ class ContentEngine:
             if bad in text: text = text.replace(bad, "")
         text = cls.MENTION_CLEANER.sub('', text)
         text = re.sub(r'\n{3,}', '\n\n', text).strip()
-        if len(text) < 25: return None
+        if not text or len(text.strip()) == 0: return None
         return text
 
     @staticmethod
@@ -497,8 +511,10 @@ async def main():
     logger.info("✅ Backfill Complete. Live Mode ON.")
     backfill_done.set()
 
-    @client.on(events.NewMessage())
+@client.on(events.NewMessage())
+    @client.on(events.MessageEdited())   # <--- این خط اضافه شود
     async def handler(event):
+        
         if not backfill_done.is_set(): return 
         try:
             chat_id = event.chat_id
@@ -553,4 +569,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt: pass
     except Exception as e: logger.critical(f"Fatal: {e}")
+
 
