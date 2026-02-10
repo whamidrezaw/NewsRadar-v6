@@ -511,10 +511,9 @@ async def main():
     logger.info("✅ Backfill Complete. Live Mode ON.")
     backfill_done.set()
 
-@client.on(events.NewMessage())
+    @client.on(events.NewMessage())
     @client.on(events.MessageEdited())   # <--- این خط اضافه شود
     async def handler(event):
-        
         if not backfill_done.is_set(): return 
         try:
             chat_id = event.chat_id
@@ -569,5 +568,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt: pass
     except Exception as e: logger.critical(f"Fatal: {e}")
+
 
 
