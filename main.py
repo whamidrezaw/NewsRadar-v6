@@ -507,10 +507,21 @@ async def main():
             is_proxy = chat_id in config.PROXY_SOURCES
             is_news = chat_id in config.NEWS_SOURCES
             
-            # Discovery Logic
+# Discovery Logic
             if not is_proxy and not is_news:
-                await pipeline.ingest({'type': 'discovery', 'chat_id': chat_id, 'title': event.chat.title or "Unknown"})
+                # اصلاح باگ: دریافت ایمن نام چت/کاربر
+                chat_title = "Unknown"
+                if event.chat:
+                    # اگر کانال یا گروه باشد، تایتل دارد
+                    if hasattr(event.chat, 'title'):
+                        chat_title = event.chat.title
+                    # اگر کاربر باشد، نام کوچک دارد
+                    elif hasattr(event.chat, 'first_name'):
+                        chat_title = event.chat.first_name
+                
+                await pipeline.ingest({'type': 'discovery', 'chat_id': chat_id, 'title': chat_title or "Unknown"})
                 return
+                
 
             source = config.PROXY_SOURCES.get(chat_id) or config.NEWS_SOURCES.get(chat_id)
             
@@ -542,3 +553,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt: pass
     except Exception as e: logger.critical(f"Fatal: {e}")
+
