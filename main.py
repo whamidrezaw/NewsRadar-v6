@@ -101,6 +101,7 @@ class Config:
     PROXY_SOURCES: Dict[int, str] = field(default_factory=lambda: {
         -1003653053311: "V2rrayVPN",
         -1002908786619: "GTAVFREEE", 
+        -1002258272508: "mitivpn",
     })
     
     PROXY_FILE_EXTENSIONS: tuple = ('.npvt', '.pv', '.conf', '.ovpn')
@@ -570,6 +571,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt: pass
     except Exception as e: logger.critical(f"Fatal: {e}")
+
 
 
 
